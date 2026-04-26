@@ -10,18 +10,16 @@ Original file is located at
 import streamlit as st
 import numpy as np
 import random
-import time
-import matplotlib.pyplot as plt
+import streamlit.components.v1 as components
 
-st.set_page_config(layout="centered")
-st.title("🚦 AI Smart Traffic Control System")
+st.title("🚦 RL-Based Traffic Control (Smooth Animation)")
 
 # ------------------------------
-# ENVIRONMENT
+# RL ENV
 # ------------------------------
 class TrafficEnv:
     def __init__(self):
-        self.state = np.array([10,10,10,10])  # N,S,E,W
+        self.state = np.array([10,10,10,10])
 
     def reset(self):
         self.state = np.random.randint(0, 20, size=4)
@@ -43,20 +41,17 @@ def discretize(state):
     return tuple(min(19, s) for s in state)
 
 # ------------------------------
-# TRAINING
+# TRAIN BUTTON
 # ------------------------------
-episodes = st.sidebar.slider("Episodes", 50, 300, 150)
-
-if st.sidebar.button("🚀 Train Agent"):
+if st.button("🚀 Train RL Agent"):
     env = TrafficEnv()
     q_table = np.zeros((20,20,20,20,2))
 
     alpha, gamma, epsilon = 0.1, 0.9, 1.0
-    rewards = []
 
-    for ep in range(episodes):
+    # TRAIN
+    for ep in range(150):
         state = discretize(env.reset())
-        total = 0
 
         for _ in range(50):
             if random.random() < epsilon:
@@ -72,114 +67,108 @@ if st.sidebar.button("🚀 Train Agent"):
             )
 
             state = next_state
-            total += reward
 
         epsilon *= 0.98
-        rewards.append(total)
 
-    st.session_state.q_table = q_table
-    st.session_state.rewards = rewards
-    st.success("✅ Training Completed!")
+    st.success("✅ Training Done!")
 
-# ------------------------------
-# GRAPH
-# ------------------------------
-if "rewards" in st.session_state:
-    st.subheader("📊 Learning Curve")
-    st.line_chart(st.session_state.rewards)
-
-# ------------------------------
-# SIMULATION
-# ------------------------------
-if "q_table" in st.session_state:
-    st.subheader("🎮 Live Simulation")
-
-    placeholder = st.empty()
-    stats_box = st.empty()
-
+    # ------------------------------
+    # GENERATE ACTION SEQUENCE
+    # ------------------------------
     env = TrafficEnv()
     state = discretize(env.reset())
 
-    cars_ns = []
-    cars_ew = []
+    actions = []
 
-    passed = 0
+    for _ in range(300):
+        action = int(np.argmax(q_table[state]))
+        actions.append(action)
 
-    for step in range(80):
-        action = np.argmax(st.session_state.q_table[state])
         state, _ = env.step(action)
         state = discretize(state)
 
-        # spawn cars
-        if random.random() < 0.3:
-            cars_ns.append([0.48, 1.0])
-        if random.random() < 0.3:
-            cars_ew.append([0.0, 0.48])
+    st.session_state.actions = actions
 
-        # move cars
-        if action == 0:  # NS green
-            for c in cars_ns:
-                c[1] -= 0.05
-        else:  # EW green
-            for c in cars_ew:
-                c[0] += 0.05
+# ------------------------------
+# ANIMATION
+# ------------------------------
+if "actions" in st.session_state:
 
-        # remove cars & count passed
-        new_ns = []
-        for c in cars_ns:
-            if c[1] > 0:
-                new_ns.append(c)
-            else:
-                passed += 1
-        cars_ns = new_ns
+    actions_js = str(st.session_state.actions)
 
-        new_ew = []
-        for c in cars_ew:
-            if c[0] < 1:
-                new_ew.append(c)
-            else:
-                passed += 1
-        cars_ew = new_ew
+    html_code = f"""
+    <canvas id="sim" width="600" height="600"></canvas>
 
-        waiting = len(cars_ns) + len(cars_ew)
+    <script>
+    const canvas = document.getElementById("sim");
+    const ctx = canvas.getContext("2d");
 
-        # ---------------- DRAW ----------------
-        fig, ax = plt.subplots()
+    let actions = {actions_js};
+    let step = 0;
 
-        # roads
-        ax.add_patch(plt.Rectangle((0.45,0),0.1,1))
-        ax.add_patch(plt.Rectangle((0,0.45),1,0.1))
+    let carsNS = [];
+    let carsEW = [];
 
-        # cars (rectangles)
-        for c in cars_ns:
-            ax.add_patch(plt.Rectangle((c[0],c[1]),0.02,0.04))
-        for c in cars_ew:
-            ax.add_patch(plt.Rectangle((c[0],c[1]),0.04,0.02))
+    function spawnCars() {{
+        if (Math.random() < 0.05) carsNS.push({{x:290, y:0}});
+        if (Math.random() < 0.05) carsEW.push({{x:0, y:290}});
+    }}
 
-        # signals
-        if action == 0:
-            ax.add_patch(plt.Circle((0.52,0.7),0.02, color='green'))
-            ax.add_patch(plt.Circle((0.3,0.52),0.02, color='red'))
-            signal_text = "NS GREEN"
-        else:
-            ax.add_patch(plt.Circle((0.52,0.7),0.02, color='red'))
-            ax.add_patch(plt.Circle((0.3,0.52),0.02, color='green'))
-            signal_text = "EW GREEN"
+    function moveCars(signal) {{
+        if (signal === 0) {{
+            carsNS.forEach(c => c.y += 2);
+        }} else {{
+            carsEW.forEach(c => c.x += 2);
+        }}
 
-        ax.set_xlim(0,1)
-        ax.set_ylim(0,1)
-        ax.axis("off")
+        carsNS = carsNS.filter(c => c.y < 600);
+        carsEW = carsEW.filter(c => c.x < 600);
+    }}
 
-        placeholder.pyplot(fig)
+    function drawRoads() {{
+        ctx.fillStyle = "#555";
+        ctx.fillRect(250, 0, 100, 600);
+        ctx.fillRect(0, 250, 600, 100);
+    }}
 
-        # stats display
-        stats_box.markdown(f"""
-        ### 📊 Live Stats
-        - 🚗 Cars Passed: **{passed}**
-        - ⏳ Waiting Cars: **{waiting}**
-        - 🚦 Signal: **{signal_text}**
-        """)
+    function drawCars() {{
+        ctx.fillStyle = "cyan";
+        carsNS.forEach(c => ctx.fillRect(c.x, c.y, 10, 20));
 
-        time.sleep(0.15)
+        ctx.fillStyle = "yellow";
+        carsEW.forEach(c => ctx.fillRect(c.x, c.y, 20, 10));
+    }}
 
-    st.success("Simulation Finished ✅")
+    function drawSignals(signal) {{
+        ctx.fillStyle = (signal === 0) ? "green" : "red";
+        ctx.beginPath();
+        ctx.arc(300, 200, 10, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle = (signal === 1) ? "green" : "red";
+        ctx.beginPath();
+        ctx.arc(200, 300, 10, 0, Math.PI*2);
+        ctx.fill();
+    }}
+
+    function loop() {{
+        ctx.clearRect(0, 0, 600, 600);
+
+        let signal = actions[step % actions.length];
+
+        drawRoads();
+        spawnCars();
+        moveCars(signal);
+        drawCars();
+        drawSignals(signal);
+
+        step++;
+
+        requestAnimationFrame(loop);
+    }}
+
+    loop();
+    </script>
+    """
+
+    components.html(html_code, height=620)
