@@ -14,7 +14,7 @@ import time
 import matplotlib.pyplot as plt
 
 st.set_page_config(layout="centered")
-st.title("🚦 Smart Traffic Control (RL + Visualization)")
+st.title("🚦 AI Smart Traffic Control System")
 
 # ------------------------------
 # ENVIRONMENT
@@ -28,31 +28,26 @@ class TrafficEnv:
         return tuple(self.state)
 
     def step(self, action):
-        if action == 0:  # NS green
+        if action == 0:
             self.state[0] = max(0, self.state[0] - 5)
             self.state[1] = max(0, self.state[1] - 5)
-        else:  # EW green
+        else:
             self.state[2] = max(0, self.state[2] - 5)
             self.state[3] = max(0, self.state[3] - 5)
 
         self.state += np.random.randint(0, 3, size=4)
         reward = -np.sum(self.state)
-
         return tuple(self.state), reward
 
 def discretize(state):
     return tuple(min(19, s) for s in state)
 
 # ------------------------------
-# SIDEBAR
-# ------------------------------
-episodes = st.sidebar.slider("Episodes", 50, 300, 150)
-train_btn = st.sidebar.button("Train Agent")
-
-# ------------------------------
 # TRAINING
 # ------------------------------
-if train_btn:
+episodes = st.sidebar.slider("Episodes", 50, 300, 150)
+
+if st.sidebar.button("🚀 Train Agent"):
     env = TrafficEnv()
     q_table = np.zeros((20,20,20,20,2))
 
@@ -84,41 +79,42 @@ if train_btn:
 
     st.session_state.q_table = q_table
     st.session_state.rewards = rewards
-
-    st.success("Training Done!")
+    st.success("✅ Training Completed!")
 
 # ------------------------------
 # GRAPH
 # ------------------------------
 if "rewards" in st.session_state:
-    st.subheader("📊 Training Graph")
+    st.subheader("📊 Learning Curve")
     st.line_chart(st.session_state.rewards)
 
 # ------------------------------
-# VISUAL SIMULATION
+# SIMULATION
 # ------------------------------
 if "q_table" in st.session_state:
-    st.subheader("🎮 Live Traffic Visualization")
+    st.subheader("🎮 Live Simulation")
 
     placeholder = st.empty()
+    stats_box = st.empty()
 
     env = TrafficEnv()
     state = discretize(env.reset())
 
-    # car positions
     cars_ns = []
     cars_ew = []
 
-    for step in range(60):
+    passed = 0
+
+    for step in range(80):
         action = np.argmax(st.session_state.q_table[state])
         state, _ = env.step(action)
         state = discretize(state)
 
         # spawn cars
         if random.random() < 0.3:
-            cars_ns.append([0.5, 1.0])  # top
+            cars_ns.append([0.48, 1.0])
         if random.random() < 0.3:
-            cars_ew.append([0.0, 0.5])  # left
+            cars_ew.append([0.0, 0.48])
 
         # move cars
         if action == 0:  # NS green
@@ -128,34 +124,62 @@ if "q_table" in st.session_state:
             for c in cars_ew:
                 c[0] += 0.05
 
-        # remove cars
-        cars_ns = [c for c in cars_ns if c[1] > 0]
-        cars_ew = [c for c in cars_ew if c[0] < 1]
+        # remove cars & count passed
+        new_ns = []
+        for c in cars_ns:
+            if c[1] > 0:
+                new_ns.append(c)
+            else:
+                passed += 1
+        cars_ns = new_ns
 
-        # DRAW
+        new_ew = []
+        for c in cars_ew:
+            if c[0] < 1:
+                new_ew.append(c)
+            else:
+                passed += 1
+        cars_ew = new_ew
+
+        waiting = len(cars_ns) + len(cars_ew)
+
+        # ---------------- DRAW ----------------
         fig, ax = plt.subplots()
 
         # roads
-        ax.plot([0.5,0.5],[0,1], linewidth=20)
-        ax.plot([0,1],[0.5,0.5], linewidth=20)
+        ax.add_patch(plt.Rectangle((0.45,0),0.1,1))
+        ax.add_patch(plt.Rectangle((0,0.45),1,0.1))
 
-        # cars
+        # cars (rectangles)
         for c in cars_ns:
-            ax.scatter(c[0], c[1])
+            ax.add_patch(plt.Rectangle((c[0],c[1]),0.02,0.04))
         for c in cars_ew:
-            ax.scatter(c[0], c[1])
+            ax.add_patch(plt.Rectangle((c[0],c[1]),0.04,0.02))
 
         # signals
         if action == 0:
-            ax.set_title("NS GREEN")
+            ax.add_patch(plt.Circle((0.52,0.7),0.02, color='green'))
+            ax.add_patch(plt.Circle((0.3,0.52),0.02, color='red'))
+            signal_text = "NS GREEN"
         else:
-            ax.set_title("EW GREEN")
+            ax.add_patch(plt.Circle((0.52,0.7),0.02, color='red'))
+            ax.add_patch(plt.Circle((0.3,0.52),0.02, color='green'))
+            signal_text = "EW GREEN"
 
         ax.set_xlim(0,1)
         ax.set_ylim(0,1)
         ax.axis("off")
 
         placeholder.pyplot(fig)
-        time.sleep(0.2)
 
-    st.info("Simulation Complete")
+        # stats display
+        stats_box.markdown(f"""
+        ### 📊 Live Stats
+        - 🚗 Cars Passed: **{passed}**
+        - ⏳ Waiting Cars: **{waiting}**
+        - 🚦 Signal: **{signal_text}**
+        """)
+
+        time.sleep(0.15)
+
+    st.success("Simulation Finished ✅")
