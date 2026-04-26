@@ -7,168 +7,135 @@ Original file is located at
     https://colab.research.google.com/drive/18J4Fa6l9O1mkeApK8SzLA56TnRUdvF-_
 """
 
-import streamlit as st
-import numpy as np
-import random
-import streamlit.components.v1 as components
-
-st.title("🚦 RL-Based Traffic Control (Smooth Animation)")
-
-# ------------------------------
-# RL ENV
-# ------------------------------
-class TrafficEnv:
-    def __init__(self):
-        self.state = np.array([10,10,10,10])
-
-    def reset(self):
-        self.state = np.random.randint(0, 20, size=4)
-        return tuple(self.state)
-
-    def step(self, action):
-        if action == 0:
-            self.state[0] = max(0, self.state[0] - 5)
-            self.state[1] = max(0, self.state[1] - 5)
-        else:
-            self.state[2] = max(0, self.state[2] - 5)
-            self.state[3] = max(0, self.state[3] - 5)
-
-        self.state += np.random.randint(0, 3, size=4)
-        reward = -np.sum(self.state)
-        return tuple(self.state), reward
-
-def discretize(state):
-    return tuple(min(19, s) for s in state)
-
-# ------------------------------
-# TRAIN BUTTON
-# ------------------------------
-if st.button("🚀 Train RL Agent"):
-    env = TrafficEnv()
-    q_table = np.zeros((20,20,20,20,2))
-
-    alpha, gamma, epsilon = 0.1, 0.9, 1.0
-
-    # TRAIN
-    for ep in range(150):
-        state = discretize(env.reset())
-
-        for _ in range(50):
-            if random.random() < epsilon:
-                action = random.choice([0,1])
-            else:
-                action = np.argmax(q_table[state])
-
-            next_state, reward = env.step(action)
-            next_state = discretize(next_state)
-
-            q_table[state][action] += alpha * (
-                reward + gamma * np.max(q_table[next_state]) - q_table[state][action]
-            )
-
-            state = next_state
-
-        epsilon *= 0.98
-
-    st.success("✅ Training Done!")
-
-    # ------------------------------
-    # GENERATE ACTION SEQUENCE
-    # ------------------------------
-    env = TrafficEnv()
-    state = discretize(env.reset())
-
-    actions = []
-
-    for _ in range(300):
-        action = int(np.argmax(q_table[state]))
-        actions.append(action)
-
-        state, _ = env.step(action)
-        state = discretize(state)
-
-    st.session_state.actions = actions
-
-# ------------------------------
-# ANIMATION
-# ------------------------------
-if "actions" in st.session_state:
-
-    actions_js = str(st.session_state.actions)
-
-    html_code = f"""
-    <canvas id="sim" width="600" height="600"></canvas>
-
-    <script>
-    const canvas = document.getElementById("sim");
-    const ctx = canvas.getContext("2d");
-
-    let actions = {actions_js};
-    let step = 0;
-
-    let carsNS = [];
-    let carsEW = [];
-
-    function spawnCars() {{
-        if (Math.random() < 0.05) carsNS.push({{x:290, y:0}});
-        if (Math.random() < 0.05) carsEW.push({{x:0, y:290}});
-    }}
-
-    function moveCars(signal) {{
-        if (signal === 0) {{
-            carsNS.forEach(c => c.y += 2);
-        }} else {{
-            carsEW.forEach(c => c.x += 2);
-        }}
-
-        carsNS = carsNS.filter(c => c.y < 600);
-        carsEW = carsEW.filter(c => c.x < 600);
-    }}
-
-    function drawRoads() {{
-        ctx.fillStyle = "#555";
-        ctx.fillRect(250, 0, 100, 600);
-        ctx.fillRect(0, 250, 600, 100);
-    }}
-
-    function drawCars() {{
-        ctx.fillStyle = "cyan";
-        carsNS.forEach(c => ctx.fillRect(c.x, c.y, 10, 20));
-
-        ctx.fillStyle = "yellow";
-        carsEW.forEach(c => ctx.fillRect(c.x, c.y, 20, 10));
-    }}
-
-    function drawSignals(signal) {{
-        ctx.fillStyle = (signal === 0) ? "green" : "red";
-        ctx.beginPath();
-        ctx.arc(300, 200, 10, 0, Math.PI*2);
-        ctx.fill();
-
-        ctx.fillStyle = (signal === 1) ? "green" : "red";
-        ctx.beginPath();
-        ctx.arc(200, 300, 10, 0, Math.PI*2);
-        ctx.fill();
-    }}
-
-    function loop() {{
-        ctx.clearRect(0, 0, 600, 600);
-
-        let signal = actions[step % actions.length];
-
-        drawRoads();
-        spawnCars();
-        moveCars(signal);
-        drawCars();
-        drawSignals(signal);
-
-        step++;
-
-        requestAnimationFrame(loop);
-    }}
-
-    loop();
-    </script>
-    """
-
-    components.html(html_code, height=620)
+# Commented out IPython magic to ensure Python compatibility.
+# %%writefile traffic_env.py
+# import gymnasium as gym
+# from gymnasium import spaces
+# import numpy as np
+# 
+# class TrafficEnv(gym.Env):
+#     def __init__(self):
+#         super(TrafficEnv, self).__init__()
+# 
+#         self.observation_space = spaces.Box(low=0, high=50, shape=(4,), dtype=np.int32)
+#         self.action_space = spaces.Discrete(2)
+# 
+#         self.state = np.array([10, 10, 10, 10])
+# 
+#     def reset(self, seed=None, options=None):
+#         self.state = np.random.randint(0, 20, size=4)
+#         return self.state, {}
+# 
+#     def step(self, action):
+#         if action == 0:  # NS green
+#             self.state[0] = max(0, self.state[0] - 5)
+#             self.state[1] = max(0, self.state[1] - 5)
+#         else:  # EW green
+#             self.state[2] = max(0, self.state[2] - 5)
+#             self.state[3] = max(0, self.state[3] - 5)
+# 
+#         # Cars arriving randomly
+#         self.state += np.random.randint(0, 3, size=4)
+# 
+#         reward = -np.sum(self.state)
+#         done = False
+# 
+#         return self.state, reward, done, False, {}
+# 
+# import streamlit as st
+# import numpy as np
+# import pandas as pd
+# import matplotlib.pyplot as plt
+# from traffic_env import TrafficEnv
+# 
+# st.set_page_config(page_title="🚦 Traffic RL", layout="wide")
+# st.title("🚦 Reinforcement Learning – Traffic Management")
+# 
+# # --- Q-Learning Agent ---
+# class QLearningAgent:
+#     def __init__(self, n_actions=2, lr=0.1, gamma=0.95, epsilon=0.1):
+#         self.q = {}
+#         self.n_actions = n_actions
+#         self.lr, self.gamma, self.epsilon = lr, gamma, epsilon
+# 
+#     def discretize(self, obs):
+#         return tuple((obs / 5).astype(int))
+# 
+#     def act(self, obs):
+#         s = self.discretize(obs)
+#         if np.random.random() < self.epsilon or s not in self.q:
+#             return np.random.randint(self.n_actions)
+#         return int(np.argmax(self.q[s]))
+# 
+#     def learn(self, obs, action, reward, next_obs):
+#         s, ns = self.discretize(obs), self.discretize(next_obs)
+#         if s not in self.q: self.q[s] = np.zeros(self.n_actions)
+#         if ns not in self.q: self.q[ns] = np.zeros(self.n_actions)
+#         target = reward + self.gamma * np.max(self.q[ns])
+#         self.q[s][action] += self.lr * (target - self.q[s][action])
+# 
+# # --- Sidebar Controls ---
+# st.sidebar.header("⚙️ Settings")
+# episodes = st.sidebar.slider("Training Episodes", 10, 500, 100)
+# lr       = st.sidebar.slider("Learning Rate", 0.01, 1.0, 0.1)
+# epsilon  = st.sidebar.slider("Epsilon (Exploration)", 0.0, 1.0, 0.2)
+# 
+# # --- Train ---
+# if st.sidebar.button("▶️ Train Agent"):
+#     env = TrafficEnv()
+#     agent = QLearningAgent(lr=lr, epsilon=epsilon)
+# 
+#     rewards, ns_q, ew_q = [], [], []
+# 
+#     with st.spinner("Training..."):
+#         for ep in range(episodes):
+#             obs, _ = env.reset()
+#             total_r = 0
+#             ep_ns, ep_ew = [], []
+#             done = False
+#             while not done:
+#                 action = agent.act(obs)
+#                 next_obs, reward, done, _, _ = env.step(action)
+#                 agent.learn(obs, action, reward, next_obs)
+#                 total_r += reward
+#                 ep_ns.append(obs[0])
+#                 ep_ew.append(obs[1])
+#                 obs = next_obs
+#             rewards.append(total_r)
+#             ns_q.append(np.mean(ep_ns))
+#             ew_q.append(np.mean(ep_ew))
+# 
+#     # --- Metrics ---
+#     col1, col2, col3 = st.columns(3)
+#     col1.metric("Final Episode Reward", f"{rewards[-1]:.2f}")
+#     col2.metric("Avg Queue NS (last ep)", f"{ns_q[-1]:.1f}")
+#     col3.metric("Avg Queue EW (last ep)", f"{ew_q[-1]:.1f}")
+# 
+#     # --- Plots ---
+#     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+#     axes[0].plot(rewards, color="#00c9a7")
+#     axes[0].set_title("Reward per Episode")
+#     axes[0].set_xlabel("Episode"); axes[0].set_ylabel("Total Reward")
+# 
+#     axes[1].plot(ns_q, label="NS Queue", color="#f7941d")
+#     axes[1].plot(ew_q, label="EW Queue", color="#4a90e2")
+#     axes[1].set_title("Avg Queue Length per Episode")
+#     axes[1].set_xlabel("Episode"); axes[1].legend()
+# 
+#     st.pyplot(fig)
+# 
+#     # --- Final Episode Detail ---
+#     st.subheader("📊 Last Episode Step-by-Step")
+#     obs, _ = env.reset()
+#     rows, done = [], False
+#     while not done:
+#         action = agent.act(obs)
+#         next_obs, reward, done, _, _ = env.step(action)
+#         rows.append({"NS Queue": obs[0], "EW Queue": obs[1],
+#                      "Action": "🟢 NS" if action == 0 else "🟢 EW",
+#                      "Reward": round(reward, 2)})
+#         obs = next_obs
+#     st.dataframe(pd.DataFrame(rows), use_container_width=True)
+# 
+# else:
+#     st.info("👈 Configure settings and click **Train Agent** to begin.")
