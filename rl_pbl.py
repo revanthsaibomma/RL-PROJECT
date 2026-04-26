@@ -7,20 +7,14 @@ Original file is located at
     https://colab.research.google.com/drive/18J4Fa6l9O1mkeApK8SzLA56TnRUdvF-_
 """
 
-# ==============================
-# STREAMLIT RL TRAFFIC CONTROL
-# ==============================
-
 import streamlit as st
 import numpy as np
 import random
 import time
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="RL Traffic Control", layout="centered")
-
-st.title("🚦 RL-Based Smart Traffic Control")
-st.write("Train a Q-learning agent to optimize traffic signals.")
+st.set_page_config(layout="centered")
+st.title("🚦 Smart Traffic Control (RL + Visualization)")
 
 # ------------------------------
 # ENVIRONMENT
@@ -41,41 +35,35 @@ class TrafficEnv:
             self.state[2] = max(0, self.state[2] - 5)
             self.state[3] = max(0, self.state[3] - 5)
 
-        # cars arriving
         self.state += np.random.randint(0, 3, size=4)
-
         reward = -np.sum(self.state)
+
         return tuple(self.state), reward
 
 def discretize(state):
     return tuple(min(19, s) for s in state)
 
 # ------------------------------
-# SIDEBAR CONTROLS
+# SIDEBAR
 # ------------------------------
-st.sidebar.header("⚙️ Settings")
-episodes = st.sidebar.slider("Training Episodes", 50, 500, 200)
-steps = st.sidebar.slider("Steps per Episode", 20, 100, 50)
-
-train_button = st.sidebar.button("🚀 Train Agent")
+episodes = st.sidebar.slider("Episodes", 50, 300, 150)
+train_btn = st.sidebar.button("Train Agent")
 
 # ------------------------------
 # TRAINING
 # ------------------------------
-if train_button:
+if train_btn:
     env = TrafficEnv()
     q_table = np.zeros((20,20,20,20,2))
 
     alpha, gamma, epsilon = 0.1, 0.9, 1.0
-    rewards_list = []
-
-    progress = st.progress(0)
+    rewards = []
 
     for ep in range(episodes):
         state = discretize(env.reset())
-        total_reward = 0
+        total = 0
 
-        for _ in range(steps):
+        for _ in range(50):
             if random.random() < epsilon:
                 action = random.choice([0,1])
             else:
@@ -89,55 +77,85 @@ if train_button:
             )
 
             state = next_state
-            total_reward += reward
+            total += reward
 
         epsilon *= 0.98
-        rewards_list.append(total_reward)
+        rewards.append(total)
 
-        progress.progress((ep+1)/episodes)
-
-    st.success("✅ Training Completed!")
-
-    # Save in session
     st.session_state.q_table = q_table
-    st.session_state.rewards = rewards_list
+    st.session_state.rewards = rewards
+
+    st.success("Training Done!")
 
 # ------------------------------
-# SHOW GRAPH
+# GRAPH
 # ------------------------------
 if "rewards" in st.session_state:
-    st.subheader("📊 Training Performance")
-    fig, ax = plt.subplots()
-    ax.plot(st.session_state.rewards)
-    ax.set_xlabel("Episodes")
-    ax.set_ylabel("Reward")
-    st.pyplot(fig)
+    st.subheader("📊 Training Graph")
+    st.line_chart(st.session_state.rewards)
 
 # ------------------------------
-# SIMULATION (ANIMATION)
+# VISUAL SIMULATION
 # ------------------------------
 if "q_table" in st.session_state:
-    st.subheader("🎮 Live Traffic Simulation")
+    st.subheader("🎮 Live Traffic Visualization")
 
     placeholder = st.empty()
 
     env = TrafficEnv()
     state = discretize(env.reset())
 
-    for _ in range(50):
+    # car positions
+    cars_ns = []
+    cars_ew = []
+
+    for step in range(60):
         action = np.argmax(st.session_state.q_table[state])
         state, _ = env.step(action)
         state = discretize(state)
 
-        # simple visualization (text-based bars)
-        n, s, e, w = state
+        # spawn cars
+        if random.random() < 0.3:
+            cars_ns.append([0.5, 1.0])  # top
+        if random.random() < 0.3:
+            cars_ew.append([0.0, 0.5])  # left
 
+        # move cars
+        if action == 0:  # NS green
+            for c in cars_ns:
+                c[1] -= 0.05
+        else:  # EW green
+            for c in cars_ew:
+                c[0] += 0.05
+
+        # remove cars
+        cars_ns = [c for c in cars_ns if c[1] > 0]
+        cars_ew = [c for c in cars_ew if c[0] < 1]
+
+        # DRAW
         fig, ax = plt.subplots()
-        ax.bar(["North","South","East","West"], [n,s,e,w])
-        ax.set_ylim(0, 30)
-        ax.set_title(f"Signal: {'NS Green' if action==0 else 'EW Green'}")
+
+        # roads
+        ax.plot([0.5,0.5],[0,1], linewidth=20)
+        ax.plot([0,1],[0.5,0.5], linewidth=20)
+
+        # cars
+        for c in cars_ns:
+            ax.scatter(c[0], c[1])
+        for c in cars_ew:
+            ax.scatter(c[0], c[1])
+
+        # signals
+        if action == 0:
+            ax.set_title("NS GREEN")
+        else:
+            ax.set_title("EW GREEN")
+
+        ax.set_xlim(0,1)
+        ax.set_ylim(0,1)
+        ax.axis("off")
 
         placeholder.pyplot(fig)
-        time.sleep(0.3)
+        time.sleep(0.2)
 
-    st.info("Simulation finished. Click Train again to retrain.")
+    st.info("Simulation Complete")
