@@ -7,54 +7,114 @@ Original file is located at
     https://colab.research.google.com/drive/18J4Fa6l9O1mkeApK8SzLA56TnRUdvF-_
 """
 
-import gymnasium as gym
-from gymnasium import spaces
+import streamlit as st
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
-class TrafficEnv(gym.Env):
-    def __init__(self):
-        super().__init__()
-        # State: [queue_NS, queue_EW, current_phase, time_in_phase]
-        self.observation_space = spaces.Box(low=0, high=50, shape=(4,), dtype=np.float32)
-        # Actions: 0=NS green, 1=EW green
-        self.action_space = spaces.Discrete(2)
-        self.reset()
-
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        self.queue_NS = np.random.randint(5, 20)
-        self.queue_EW = np.random.randint(5, 20)
+# ── Environment ──────────────────────────────────────────────
+class TrafficEnv:
+    def reset(self):
+        self.ns = np.random.randint(5, 20)
+        self.ew = np.random.randint(5, 20)
         self.phase = 0
-        self.time_in_phase = 0
-        self.step_count = 0
-        return self._obs(), {}
+        self.t = 0
+        return self._obs()
 
     def _obs(self):
-        return np.array([self.queue_NS, self.queue_EW, self.phase, self.time_in_phase], dtype=np.float32)
+        return np.array([self.ns, self.ew, self.phase, self.t], dtype=np.float32)
 
     def step(self, action):
-        # Cars arrive randomly
-        self.queue_NS += np.random.poisson(3)
-        self.queue_EW += np.random.poisson(3)
+        self.ns += np.random.poisson(3)
+        self.ew += np.random.poisson(3)
+        if action == 0: self.ns = max(0, self.ns - 5)
+        else:           self.ew = max(0, self.ew - 5)
+        reward = -(self.ns + self.ew) / 10.0
+        if action != self.phase: self.t = 0; self.phase = action
+        else: self.t += 1
+        self.step_n = getattr(self, "step_n", 0) + 1
+        done = self.step_n >= 100
+        return self._obs(), reward, done
 
-        # Dispatch cars based on green light
-        if action == 0:
-            cleared = min(self.queue_NS, 5)
-            self.queue_NS -= cleared
-        else:
-            cleared = min(self.queue_EW, 5)
-            self.queue_EW -= cleared
+# ── Q-Learning Agent ─────────────────────────────────────────
+class Agent:
+    def __init__(self, lr, gamma, eps):
+        self.q = {}; self.lr = lr; self.gamma = gamma; self.eps = eps
 
-        # Penalty for long queues
-        reward = -(self.queue_NS + self.queue_EW) / 10.0
+    def _s(self, o): return tuple((o / 5).astype(int))
 
-        # Phase tracking
-        if action != self.phase:
-            self.time_in_phase = 0
-            self.phase = action
-        else:
-            self.time_in_phase += 1
+    def act(self, o):
+        s = self._s(o)
+        if np.random.random() < self.eps or s not in self.q:
+            return np.random.randint(2)
+        return int(np.argmax(self.q[s]))
 
-        self.step_count += 1
-        done = self.step_count >= 100
-        return self._obs(), reward, done, False, {}
+    def learn(self, o, a, r, no):
+        s, ns = self._s(o), self._s(no)
+        if s  not in self.q: self.q[s]  = np.zeros(2)
+        if ns not in self.q: self.q[ns] = np.zeros(2)
+        self.q[s][a] += self.lr * (r + self.gamma * np.max(self.q[ns]) - self.q[s][a])
+
+# ── Streamlit UI ─────────────────────────────────────────────
+st.set_page_config(page_title="Traffic RL", page_icon="🚦", layout="wide")
+st.title("🚦 RL Traffic Signal Controller")
+st.markdown("Q-Learning agent controls NS / EW green phases to minimize queue length.")
+
+with st.sidebar:
+    st.header("⚙️ Hyperparameters")
+    episodes = st.slider("Episodes",     50,  500, 200)
+    lr       = st.slider("Learning Rate", 0.01, 1.0, 0.1)
+    gamma    = st.slider("Discount (γ)",  0.5,  1.0, 0.95)
+    eps      = st.slider("Epsilon (ε)",   0.0,  1.0, 0.2)
+    train_btn = st.button("▶ Train Agent", use_container_width=True)
+
+if train_btn:
+    env   = TrafficEnv()
+    agent = Agent(lr, gamma, eps)
+    rewards, avg_ns, avg_ew = [], [], []
+
+    bar = st.progress(0, text="Training...")
+    for ep in range(episodes):
+        obs = env.reset(); env.step_n = 0
+        tot, ep_ns, ep_ew, done = 0, [], [], False
+        while not done:
+            a = agent.act(obs)
+            nobs, r, done = env.step(a)
+            agent.learn(obs, a, r, nobs)
+            tot += r; ep_ns.append(obs[0]); ep_ew.append(obs[1])
+            obs = nobs
+        rewards.append(tot); avg_ns.append(np.mean(ep_ns)); avg_ew.append(np.mean(ep_ew))
+        bar.progress((ep + 1) / episodes, text=f"Episode {ep+1}/{episodes}")
+    bar.empty()
+
+    # Metrics
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Final Reward",      f"{rewards[-1]:.2f}")
+    c2.metric("Avg NS Queue",      f"{avg_ns[-1]:.1f} cars")
+    c3.metric("Avg EW Queue",      f"{avg_ew[-1]:.1f} cars")
+
+    # Charts
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+    ax1.plot(rewards, color="#00c9a7"); ax1.set_title("Reward per Episode")
+    ax1.set_xlabel("Episode"); ax1.set_ylabel("Total Reward")
+    ax2.plot(avg_ns, label="NS", color="#f7941d")
+    ax2.plot(avg_ew, label="EW", color="#4a90e2")
+    ax2.set_title("Avg Queue Length"); ax2.set_xlabel("Episode"); ax2.legend()
+    st.pyplot(fig)
+
+    # Final episode walkthrough
+    st.subheader("📋 Final Episode Trace")
+    obs = env.reset(); env.step_n = 0
+    rows, done = [], False
+    while not done:
+        a = agent.act(obs)
+        nobs, r, done = env.step(a)
+        rows.append({"Step": env.step_n, "NS Queue": int(obs[0]),
+                     "EW Queue": int(obs[1]),
+                     "Green": "🟢 NS" if a == 0 else "🟢 EW",
+                     "Reward": round(r, 2)})
+        obs = nobs
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, height=300)
+
+else:
+    st.info("👈 Set parameters in the sidebar and click **Train Agent**.")
